@@ -1,0 +1,20 @@
+-- Create entities
+create author:jk { name = "J.K. Rowling" };
+
+create book:hp1 { 
+  title = "Philosopher’s Stone", 
+  pages = 223, 
+  author -> author:jk
+};
+
+create book:hp2 { 
+  title = "Chamber of Secrets" 
+};
+
+-- Manual linking (alternative to inline)
+link author:jk -> book:hp2;
+
+-- Queries
+select * from author where name = "J.K. Rowling";
+select title from book:hp1;
+select * from author->book where title like "Harry Potter";
