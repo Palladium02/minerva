@@ -10,9 +10,8 @@
 ![Rust](https://img.shields.io/badge/language-Rust-orange)
 
 ## Features (planned)
-- 
 - Graph data model (nodes, edges, properties)
-- Query language (SQL/GraphQL inspired)
+- Query language (SurrealQL inspired)
 - Traversal and pattern matching
 - Indexing and persistence
 
