@@ -11,7 +11,7 @@ pub(crate) enum ParseError {
 #[derive(Debug)]
 pub(crate) enum AST {
     // TODO: insert actual type for filter expression
-    Select(Projection, PathExpression, Option<()>)
+    Select(Projection, PathExpression, Option<FilterExpression>)
 }
 
 #[derive(Debug)]
@@ -29,6 +29,62 @@ pub(crate) enum EntityDescription {
 #[derive(Debug)]
 pub(crate) struct PathExpression(EntityDescription, Vec<EntityDescription>);
 
+#[derive(Debug)]
+pub(crate) enum FilterExpression {
+    Plain(String, Operator, Value),
+    And(Box<FilterExpression>, Box<FilterExpression>),
+    Or(Box<FilterExpression>, Box<FilterExpression>),
+}
+
+#[derive(Debug)]
+pub(crate) enum Operator {
+    Equals,
+    NotEquals,
+    SmallerThan,
+    GreaterThan,
+    SmallerThanOrEqual,
+    GreaterThanOrEqual,
+    Like,
+}
+
+impl TryFrom<Token> for Operator {
+    type Error = ();
+
+    fn try_from(value: Token) -> Result<Self, Self::Error> {
+        match value {
+            Token::Equals => Ok(Operator::Equals),
+            Token::NotEquals => Ok(Operator::NotEquals),
+            Token::SmallerThan => Ok(Operator::SmallerThan),
+            Token::GreaterThan => Ok(Operator::GreaterThan),
+            Token::SmallerThanOrEquals => Ok(Operator::SmallerThanOrEqual),
+            Token::GreaterThanOrEquals => Ok(Operator::GreaterThanOrEqual),
+            Token::Like => Ok(Operator::Like),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum Value {
+    String(String),
+    Int(usize),
+    Float(f64),
+}
+
+impl TryFrom<Token> for Value {
+    type Error = ();
+
+    fn try_from(value: Token) -> Result<Self, Self::Error> {
+        match value {
+            Token::StringLiteral(string) => Ok(Value::String(string)),
+            Token::IntLiteral(int) => Ok(Value::Int(int)),
+            Token::FloatLiteral(float) => Ok(Value::Float(float)),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct Parser<'t> {
     input: Peekable<Lexer<'t>>,
 }
@@ -64,9 +120,9 @@ impl<'t> Parser<'t> {
                     return Ok(AST::Select(projection, path_expression, None));
                 },
                 _ => {
-                    let _ = self.expect_filter_condition()?;
+                    let filter_expression = self.expect_filter_condition()?;
                     // TODO: actually pass in what expect_filter_condition returns
-                    return Ok(AST::Select(projection, path_expression, Some(())));
+                    return Ok(AST::Select(projection, path_expression, Some(filter_expression)));
                 },
             }
         }
@@ -96,9 +152,12 @@ impl<'t> Parser<'t> {
                 let mut fields = Vec::new();
 
                 loop {
-                    let (token, _) = self.input.next().ok_or(ParseError::UnexpectedEOF)?;
+                    // peek first then consume if identifier to prevent the parser to consume the
+                    // from token that comes after a projection
+                    let (token, _) = self.input.peek().ok_or(ParseError::UnexpectedEOF)?;
                     if let Token::Identifier(field) = token {
-                        fields.push(field);
+                        fields.push(field.to_string());
+                        self.input.next();
                         if let Some((peeked_next, _)) = self.input.peek() {
                             if *peeked_next == Token::Comma {
                                 self.input.next();
@@ -165,8 +224,62 @@ impl<'t> Parser<'t> {
         unreachable!()
     }
 
-    fn expect_filter_condition(&mut self) -> Result<(), ParseError> {
-        todo!()
+    fn expect_filter_condition(&mut self) -> Result<FilterExpression, ParseError> {
+        let _ = self.expect_token_type(TokenKind::Where)?;
+        let filter_expression = self.expect_expression()?;
+        let _ = self.expect_token_type(TokenKind::Semicolon);
+
+        Ok(filter_expression)
+    }
+
+    fn expect_expression(&mut self) -> Result<FilterExpression, ParseError> {
+        let expression = match self.input.next() {
+            Some((Token::LParen, _)) => {
+                let expression = self.expect_expression()?;
+                let _ = self.expect_token_type(TokenKind::RParen)?;
+
+                Ok(expression)
+            },
+            Some((token, _)) => {
+                if let Token::Identifier(identifier) = token.clone() {
+                    let operator = self.expect_operator()?;
+                    let value = self.expect_value()?;
+                    Ok(FilterExpression::Plain(identifier, operator, value))
+                } else {
+                    Err(ParseError::UnexpectedToken(token))
+                }
+            },
+            None => Err(ParseError::UnexpectedEOF),
+        };
+
+        let mut cloned_input = self.input.clone();
+        let peeked_next = cloned_input.peek();
+        match peeked_next {
+            Some((token @ (Token::And | Token::Or), _)) => {
+                let rhs = self.expect_expression()?;
+                match token {
+                    Token::And => Ok(FilterExpression::And(Box::new(expression?), Box::new(rhs))),
+                    Token::Or => Ok(FilterExpression::Or(Box::new(expression?), Box::new(rhs))),
+                    _ => unreachable!(),
+                }
+            },
+            // TODO: done here?
+            _ => expression,
+        }
+    }
+
+    fn expect_operator(&mut self) -> Result<Operator, ParseError> {
+        match self.input.next() {
+            Some((token, _)) => Operator::try_from(token.clone()).map_err(|_| ParseError::UnexpectedToken(token)),
+            None => Err(ParseError::UnexpectedEOF),
+        }
+    }
+
+    fn expect_value(&mut self) -> Result<Value, ParseError> {
+        match self.input.next() {
+            Some((token, _)) => Value::try_from(token.clone()).map_err(|_| ParseError::UnexpectedToken(token)),
+            None => Err(ParseError::UnexpectedEOF)
+        }
     }
 
     fn expect_token_type(&mut self, kind: TokenKind) -> Result<Token, ParseError> {

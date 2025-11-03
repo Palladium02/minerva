@@ -40,6 +40,7 @@ pub(crate) enum Token {
     GreaterThan,
     SmallerThan,
     Equals,
+    NotEquals,
     GreaterThanOrEquals,
     SmallerThanOrEquals,
     Identifier(String),
@@ -54,6 +55,7 @@ pub(crate) enum Token {
     From,
     And,
     Or,
+    Not,
     Unknown(char),
 }
 
@@ -76,6 +78,7 @@ impl Token {
             Token::GreaterThan => TokenKind::GreaterThan,
             Token::SmallerThan => TokenKind::SmallerThan,
             Token::Equals => TokenKind::Equals,
+            Token::NotEquals => TokenKind::NotEquals,
             Token::GreaterThanOrEquals => TokenKind::GreaterThanOrEquals,
             Token::SmallerThanOrEquals => TokenKind::SmallerThanOrEquals,
             Token::Identifier(_) => TokenKind::Identifier,
@@ -90,6 +93,7 @@ impl Token {
             Token::From => TokenKind::From,
             Token::And => TokenKind::And,
             Token::Or => TokenKind::Or,
+            Token::Not => TokenKind::Not,
             Token::Unknown(_) => TokenKind::Unknown,
         }
     }
@@ -113,6 +117,7 @@ pub(crate) enum TokenKind {
     GreaterThan,
     SmallerThan,
     Equals,
+    NotEquals,
     GreaterThanOrEquals,
     SmallerThanOrEquals,
     Identifier,
@@ -127,9 +132,11 @@ pub(crate) enum TokenKind {
     From,
     And,
     Or,
+    Not,
     Unknown,
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct Lexer<'c> {
     input: Peekable<Chars<'c>>,
     position: usize,
@@ -203,6 +210,13 @@ impl<'c> Lexer<'c> {
                 }
             }
             '=' => self.emit_token(current_position, Token::Equals),
+            '!' => {
+                if let Some(_) = self.next_char_if(|c| c == '=') {
+                    self.emit_token(current_position, Token::NotEquals)
+                } else {
+                    self.emit_token(current_position, Token::Not)
+                }
+            }
             c if c.is_alphabetic() => {
                 let mut identifier = String::from(c);
                 while let Some(c) = self.next_char_if(|c| c.is_alphanumeric() || c == '_') {
