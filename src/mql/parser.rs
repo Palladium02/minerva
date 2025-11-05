@@ -1,5 +1,6 @@
 use std::iter::Peekable;
-use crate::mql::lexer::{Lexer, Span, Token, TokenKind};
+use std::collections::HashMap;
+use crate::mql::lexer::{Lexer, Token, TokenKind};
 
 #[derive(Debug)]
 pub(crate) enum ParseError {
@@ -11,7 +12,9 @@ pub(crate) enum ParseError {
 #[derive(Debug)]
 pub(crate) enum AST {
     // TODO: insert actual type for filter expression
-    Select(Projection, PathExpression, Option<FilterExpression>)
+    Select(Projection, PathExpression, Option<FilterExpression>),
+    Create(EntityDescription, HashMap<String, Value>),
+    Link(EntityDescription, EntityDescription),
 }
 
 #[derive(Debug)]
@@ -132,11 +135,21 @@ impl<'t> Parser<'t> {
     }
 
     fn expect_create_statement(&mut self) -> Result<AST, ParseError> {
-        todo!()
+        let _ = self.expect_token_type(TokenKind::Create)?;
+        let entity_description = self.expect_entity_description()?;
+        let values = self.expect_key_value_pairs()?;
+        let _ = self.expect_token_type(TokenKind::Semicolon);
+
+        Ok(AST::Create(entity_description, values))
     }
 
     fn expect_link_statement(&mut self) -> Result<AST, ParseError> {
-        todo!()
+        let _ = self.expect_token_type(TokenKind::Link);
+        let lhs_entity_description = self.expect_entity_description()?;
+        let _ = self.expect_token_type(TokenKind::ArrowRight);
+        let rhs_entity_description = self.expect_entity_description()?;
+
+        Ok(AST::Link(lhs_entity_description, rhs_entity_description))
     }
 
     fn expect_projection(&mut self) -> Result<Projection, ParseError> {
@@ -280,6 +293,46 @@ impl<'t> Parser<'t> {
             Some((token, _)) => Value::try_from(token.clone()).map_err(|_| ParseError::UnexpectedToken(token)),
             None => Err(ParseError::UnexpectedEOF)
         }
+    }
+
+    fn expect_key_value_pairs(&mut self) -> Result<HashMap<String, Value>, ParseError> {
+        let mut values = HashMap::new();
+
+        let _ = self.expect_token_type(TokenKind::RBrace);
+
+        loop {
+            let peeked_next = self.input.peek();
+            match peeked_next {
+                Some((Token::LBrace, _)) => return Ok(values),
+                Some((_, _)) => {
+                    let pair = self.expect_key_value_pair()?;
+                    values.insert(pair.0, pair.1);
+                    if let Some((Token::Comma, _)) = self.input.peek() {
+                        self.input.next();
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        self.expect_token_type(TokenKind::LBrace)?;
+
+        Ok(values)
+    }
+
+    fn expect_key_value_pair(&mut self) -> Result<(String, Value), ParseError> {
+        let key = if let Token::Identifier(identifier) = self.expect_token_type(TokenKind::Identifier)? {
+            identifier
+        } else {
+            unreachable!()
+        };
+        let _ = self.expect_token_type(TokenKind::Equals);
+        let value = self.expect_value()?;
+
+        Ok((key, value))
     }
 
     fn expect_token_type(&mut self, kind: TokenKind) -> Result<Token, ParseError> {
